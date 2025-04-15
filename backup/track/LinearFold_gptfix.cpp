@@ -886,11 +886,11 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                 // lisiz, constriants
                 if (use_constraints){
                     if (!allow_unpaired_position[j]){
-                        jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
+                        jnext = (*cons)[j] > j ? (*cons)[j] : -1;
                     }
                     if (jnext != -1){
                         int nucjnext = nucs[jnext];
-                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
+                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))
                             jnext = -1;
                     }
                 }
@@ -900,7 +900,6 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                     int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
                     value_type newscore;
-
 #ifdef lv
                     int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
@@ -917,8 +916,10 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #endif
                     // this candidate must be the best one at [j, jnext]
                     // so no need to check the score
+                    #pragma omp critical(update_H_forward)
                     update_if_better(bestH[jnext][j], newscore, MANNER_H);
 
+                    #pragma omp atomic
                     ++ nos_H;
                     
                 }
@@ -1080,330 +1081,202 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 
         // beam of P
         {
-            if (beam > 0 && beamstepP.size() > beam) beam_prune(beamstepP);
 
-            // for every state in P[j]
-            //   1. generate new helix/bulge
-            //   2. M = P
-            //   3. M2 = M + P
-            //   4. C = C + P
 #ifdef is_cube_pruning
-            bool use_cube_pruning = beam > MIN_CUBE_PRUNING_SIZE
-                                    && beamstepP.size() > MIN_CUBE_PRUNING_SIZE;
+            bool use_cube_pruning = beam > MIN_CUBE_PRUNING_SIZE && beamstepP.size() > MIN_CUBE_PRUNING_SIZE;
 #else
             bool use_cube_pruning = false;
-#endif               
+#endif
 
-#ifdef lv
-            std::vector<std::pair<int, State>> keys;
-            sort_keys(beamstepP, keys);
-            
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
-#else
+            // First, if beamstepP exceeds beam size, prune it.
+            if (beam > 0 && beamstepP.size() > (unsigned)beam)
+                beam_prune(beamstepP);
+
+            // Copy beamstepP into a vector for safe parallel iteration.
             std::vector<std::pair<int, State>> p_items;
             p_items.reserve(beamstepP.size());
-            for (const auto& item : beamstepP) p_items.push_back(item);
+            for (const auto& item : beamstepP)
+                p_items.push_back(item);
 
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < p_items.size(); ++idx) {
-                const auto& item = p_items[idx];
-#endif
-                int i = item.first;
-                const State& state = item.second;
-                int nuci = nucs[i];
-                int nuci_1 = (i-1>-1) ? nucs[i-1] : -1;
+            // Define a simple hash for std::pair<int,int> for bestP updates.
+            struct pair_hash {
+                std::size_t operator()(const std::pair<int,int>& p) const {
+                    return std::hash<int>()(p.first) ^ (std::hash<int>()(p.second) << 1);
+                }
+            };
 
-                // 2. M = P // lhuang: check j (this P is not the last non-closing P in multi)
-                if(i > 0 && j < seq_length-6){
-                    value_type newscore;
+            // OpenMP parallel region: each thread will work on a portion of p_items.
+            #pragma omp parallel
+            {
+                // Thread-local update containers.
+                std::unordered_map<int, State> local_M_updates;      // For updating beamstepM (keyed by i).
+                std::unordered_map<int, State> local_M2_updates;       // For updating beamstepM2.
+                State local_C_update = bestC[j];                       // Local copy for beamstepC update.
+                // For bestP updates, we use a key (q,p) (q is the outer index, p is the inner index).
+                std::unordered_map<std::pair<int,int>, State, pair_hash> local_P_updates;
+
+                // Divide work over p_items.
+                #pragma omp for nowait
+                for (size_t idx = 0; idx < p_items.size(); ++idx) {
+                    int i = p_items[idx].first;
+                    const State& state = p_items[idx].second;
+                    int nuci = nucs[i];
+                    int nuci_1 = (i - 1 > -1) ? nucs[i - 1] : -1;
+
+                    // --- Step 2: Update M = P ---
+                    if (i > 0 && j < seq_length - 6) {
+                        value_type newscore;
 #ifdef lv
-                        newscore = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model) + state.score;
+                        newscore = -v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model) + state.score;
 #else
                         newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #endif
-                    #pragma omp critical(update_M_eq_P)
-                    update_if_better(beamstepM[i], newscore, MANNER_M_eq_P);
+                        update_if_better(local_M_updates[i], newscore, MANNER_M_eq_P);
+                    }
 
-                    #pragma omp atomic
-                    ++ nos_M;
-                }
-                //printf(" M = P at %d\n", j); fflush(stdout);
-
-                // 3. M2 = M + P // lhuang: check j < n-1
-                if(!use_cube_pruning && j < seq_length - 1) {
-                    int k = i - 1;
-                    if ( k > 0 && !bestM[k].empty()) {
-                        value_type M1_score;
+                    // --- Step 3: Update M2 = M + P (if not using cube pruning) ---
+                    if (!use_cube_pruning && j < seq_length - 1) {
+                        int k = i - 1;
+                        if (k > 0 && !bestM[k].empty()) {
+                            value_type M1_score;
 #ifdef lv
-                            M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model) + state.score;
+                            M1_score = -v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model) + state.score;
 #else
                             M1_score = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #endif
-                        // candidate list
-                        auto bestM2_iter = beamstepM2.find(i);
-#ifndef is_candidate_list
-                        for (auto &m : bestM[k]) {
-                                int newi = m.first;
-                                // eq. to first convert P to M1, then M2/M = M + M1
-                                value_type newscore = M1_score + m.second.score;
-
-                                #pragma omp critical(update_M2_from_MP)
-                                update_if_better(beamstepM2[newi], newscore, MANNER_M2_eq_M_plus_P, k);
-                                #pragma omp atomic
-                                ++nos_M2;
-                            }
-#else
-                        if (bestM2_iter==beamstepM2.end() || M1_score > bestM2_iter->second.score) {
+                            // For every candidate in bestM[k], update local_M2_updates.
                             for (auto &m : bestM[k]) {
                                 int newi = m.first;
-                                // eq. to first convert P to M1, then M2/M = M + M1
                                 value_type newscore = M1_score + m.second.score;
-
-                                #pragma omp critical(update_M2_from_MP)
-                                update_if_better(beamstepM2[newi], newscore, MANNER_M2_eq_M_plus_P, k);
-
-                                #pragma omp atomic
-                                ++nos_M2;
+                                update_if_better(local_M2_updates[newi], newscore, MANNER_M2_eq_M_plus_P, k);
                             }
                         }
-#endif
                     }
-                }
-                //printf(" M/M2 = M + P at %d\n", j); fflush(stdout);
 
-                // 4. C = C + P
-                {
-                    int k = i - 1;
-                    if (k >= 0) {
-                    State& prefix_C = bestC[k];
-                    if (prefix_C.manner != MANNER_NONE) {
-                        int nuck = nuci_1;
-                        int nuck1 = nuci;
-                        value_type newscore;
+                    // --- Step 4: Update C = C + P ---
+                    {
+                        int k = i - 1;
+                        if (k >= 0) {
+                            State& prefix_C = bestC[k];
+                            if (prefix_C.manner != MANNER_NONE) {
+                                int nuck = nuci_1;
+                                int nuck1 = nuci;
+                                value_type newscore;
 #ifdef lv
-                            newscore = - v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length, dangle_model) +
-                                prefix_C.score + state.score;
+                                newscore = -v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length, dangle_model)
+                                        + prefix_C.score + state.score;
 #else
-                            newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length) +
-                                prefix_C.score + state.score;
+                                newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length)
+                                        + prefix_C.score + state.score;
 #endif
-                        #pragma omp critical(update_C_from_C_plus_P)
-                        update_if_better(beamstepC, newscore, MANNER_C_eq_C_plus_P, k);
-
-                        #pragma omp atomic
-                        ++ nos_C;
-                    }
-                    } else {
-                        value_type newscore;
+                                update_if_better(local_C_update, newscore, MANNER_C_eq_C_plus_P, k);
+                            }
+                        } else {
+                            value_type newscore;
 #ifdef lv
-                            newscore = - v_score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length, dangle_model) + state.score;
+                            newscore = -v_score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length, dangle_model) + state.score;
 #else
                             newscore = score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length) + state.score;
 #endif
-                        #pragma omp critical(update_C_from_C_plus_P_start)
-                        update_if_better(beamstepC, newscore, MANNER_C_eq_C_plus_P, -1);
-
-                        #pragma omp atomic
-                        ++ nos_C;
+                            update_if_better(local_C_update, newscore, MANNER_C_eq_C_plus_P, -1);
+                        }
                     }
-                }
-                //printf(" C = C + P at %d\n", j); fflush(stdout);
 
-                // 1. generate new helix / single_branch
-                // new state is of shape p..i..j..q
-                if (i >0 && j<seq_length-1) {
-                    value_type precomputed;
+                    // --- Step 1: Generate new helix/single branch candidates (update bestP) ---
+                    if (i > 0 && j < seq_length - 1) {
+                        value_type precomputed;
 #ifdef lv
                         precomputed = 0;
 #else
                         precomputed = score_junction_B(j, i, nucj, nucj1, nuci_1, nuci);
 #endif
-                    for (int p = i - 1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
-                        int nucp = nucs[p];
-                        int nucp1 = nucs[p + 1]; // hzhang: move here
-                        int q = next_pair[nucp][j];
+                        // Loop over possible left indices p.
+                        for (int p = i - 1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                            int nucp = nucs[p];
+                            int nucp1 = nucs[p + 1];
+                            int q = next_pair[nucp][j];
 
-                        // lisiz constraints
-                        if (use_constraints){
-                            if (p < i-1 && !allow_unpaired_position[p+1]) // lisiz: if p+1 must be paired, break
-                                break;
-                            if (!allow_unpaired_position[p]){             // lisiz: if p must be paired, p must be left bracket
-                                q = (*cons)[p];
-                                if (q < p) break;
-                            }
-                        }
-
-                        while (q != -1 && ((i - p) + (q - j) - 2 <= SINGLE_MAX_LEN)) {
-                            int nucq = nucs[q];
-
-                            // lisiz constraints
-                            if (use_constraints){
-                                if (q>j+1 && q > allow_unpaired_range[j])  // lisiz: if q-1 must be paired, break
+                            // Apply constraints if needed.
+                            if (use_constraints) {
+                                if (p < i - 1 && !allow_unpaired_position[p + 1])
                                     break;
-                                if (!allow_paired(p, q, cons, nucp, nucq)) // lisiz: if p q are )(, break
-                                    break;
+                                if (!allow_unpaired_position[p]) {
+                                    q = (*cons)[p];
+                                    if (q < p)
+                                        break;
+                                }
                             }
-
-                            int nucq_1 = nucs[q - 1];
-                            if (p == i - 1 && q == j + 1) {
-                                // helix
+                            while (q != -1 && ((i - p) + (q - j) - 2 <= SINGLE_MAX_LEN)) {
+                                int nucq = nucs[q];
+                                if (use_constraints) {
+                                    if (q > j + 1 && q > allow_unpaired_range[j])
+                                        break;
+                                    if (!allow_paired(p, q, cons, nucp, nucq))
+                                        break;
+                                }
+                                int nucq_1 = nucs[q - 1];
                                 value_type newscore;
+                                if (p == i - 1 && q == j + 1) {
+                                    // Helix case.
 #ifdef lv
-                                    newscore = -v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
-                                        + state.score;
-                                    // SHAPE for Vienna only
+                                    newscore = -v_score_single(p, q, i, j, nucp, nucp1, nucq_1, nucq,
+                                                            nuci_1, nuci, nucj, nucj1)
+                                            + state.score;
                                     if (use_shape)
-                                        newscore += -(pseudo_energy_stack[p] + pseudo_energy_stack[i] + pseudo_energy_stack[j] + pseudo_energy_stack[q]);
+                                        newscore += -(pseudo_energy_stack[p] + pseudo_energy_stack[i] +
+                                                    pseudo_energy_stack[j] + pseudo_energy_stack[q]);
 #else
                                     newscore = score_helix(nucp, nucp1, nucq_1, nucq) + state.score;
 #endif
-                                #pragma omp critical(update_helix_P)
-                                update_if_better(bestP[q][p], newscore, MANNER_HELIX);
-
-                                #pragma omp atomic
-                                ++nos_P;
-                            } else {
-                                // single branch
-                                value_type newscore;
+                                    update_if_better(local_P_updates[std::make_pair(q, p)], newscore, MANNER_HELIX);
+                                } else {
+                                    // Single branch case.
 #ifdef lv
-                                    newscore = - v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
-                                        + state.score;
+                                    newscore = -v_score_single(p, q, i, j, nucp, nucp1, nucq_1, nucq,
+                                                            nuci_1, nuci, nucj, nucj1)
+                                            + state.score;
 #else
-                                    newscore = score_junction_B(p, q, nucp, nucp1, nucq_1, nucq) +
-                                        precomputed +
-                                        score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1) +
-                                        state.score;
+                                    newscore = score_junction_B(p, q, nucp, nucp1, nucq_1, nucq)
+                                            + precomputed +
+                                            score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1)
+                                            + state.score;
 #endif
-                                #pragma omp critical(update_single_P)
-                                update_if_better(bestP[q][p], newscore, MANNER_SINGLE,
-                                                static_cast<char>(i - p),
-                                                q - j);
-
-                                #pragma omp atomic
-                                ++nos_P;
+                                    update_if_better(local_P_updates[std::make_pair(q, p)], newscore, MANNER_SINGLE,
+                                                    static_cast<char>(i - p), q - j);
+                                }
+                                q = next_pair[nucp][q];
                             }
-                            q = next_pair[nucp][q];
                         }
                     }
+                } // End of omp for
+
+                // Now merge thread-local updates into the shared global containers.
+                #pragma omp critical(merge_M)
+                {
+                    for (auto& kv : local_M_updates)
+                        update_if_better(beamstepM[kv.first], kv.second.score, kv.second.manner);
                 }
-            }
-
-            // lhuang: check j < n-1
-            if (use_cube_pruning && j < seq_length - 1) {
-                // 3. M2 = M + P with cube pruning
-                vector<int> valid_Ps;
-                vector<value_type> M1_scores;
-#ifdef lv
-            std::vector<std::pair<int, State>> keys;
-            sort_keys(beamstepP, keys);
-
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
-#else
-            std::vector<std::pair<int, State>> p_items;
-            p_items.reserve(beamstepP.size());
-            for (const auto& item : beamstepP) p_items.push_back(item);
-
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < p_items.size(); ++idx) {
-                const auto& item = p_items[idx];
-#endif
-                    int i = item.first;
-                    const State &state = item.second;
-                    int nuci = nucs[i];
-                    int nuci_1 = (i - 1 > -1) ? nucs[i - 1] : -1;
-                    int k = i - 1;
-
-                    // group candidate Ps
-                    if (k > 0 && !bestM[k].empty()) {
-                        assert(bestM[k].size() == sorted_bestM[k].size());
-                        value_type M1_score;
-#ifdef lv
-                            M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model) + state.score;
-#else
-                            M1_score = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
-#endif
-                        auto bestM2_iter = beamstepM2.find(i);
-#ifndef is_candidate_list
-                        valid_Ps.push_back(i);
-                        M1_scores.push_back(M1_score);
-#else
-                        if (bestM2_iter == beamstepM2.end() || M1_score > bestM2_iter->second.score) {
-                            valid_Ps.push_back(i);
-                            M1_scores.push_back(M1_score);
-                        }
-#endif
+                #pragma omp critical(merge_M2)
+                {
+                    for (auto& kv : local_M2_updates)
+                        update_if_better(beamstepM2[kv.first], kv.second.score, kv.second.manner);
+                }
+                #pragma omp critical(merge_C)
+                {
+                    update_if_better(beamstepC, local_C_update.score, local_C_update.manner);
+                }
+                #pragma omp critical(merge_P)
+                {
+                    // Merge the local bestP updates into global bestP.
+                    for (auto& kv : local_P_updates) {
+                        int p = kv.first.second;
+                        int q = kv.first.first;
+                        update_if_better(bestP[q][p], kv.second.score, kv.second.manner);
                     }
                 }
-
-                // build max heap
-                // heap is of form (heuristic score, (index of i in valid_Ps, index of M in bestM[i-1]))
-                vector<pair<value_type, pair<int, int>>> heap;
-                for (int p = 0; p < valid_Ps.size(); ++p) {
-                    int i = valid_Ps[p];
-                    int k = i - 1;
-                    heap.push_back(make_pair(M1_scores[p] + sorted_bestM[k][0].first,
-                                            make_pair(p, 0)
-                    ));
-                    push_heap(heap.begin(), heap.end());
-                }
-
-                // start cube pruning
-                // stop after beam size M2 states being filled
-                int filled = 0;
-                // exit when filled >= beam and current score < prev score
-                value_type prev_score = VALUE_MIN;
-                value_type current_score = VALUE_MIN;
-                while ((filled < beam || current_score == prev_score) && !heap.empty()) {
-                    auto &top = heap.front();
-                    prev_score = current_score;
-                    current_score = top.first;
-                    int index_P = top.second.first;
-                    int index_M = top.second.second;
-                    int i = valid_Ps[top.second.first];
-                    int k = i - 1;
-                    int newi = sorted_bestM[k][index_M].second;
-                    value_type newscore = M1_scores[index_P] + bestM[k][newi].score;
-                    pop_heap(heap.begin(), heap.end());
-                    heap.pop_back();
-
-                    if (beamstepM2[newi].manner == MANNER_NONE) {
-                        ++filled;
-                        #pragma omp critical(update_M2_eq_M_plus_P)
-                        update_if_better(beamstepM2[newi], newscore, MANNER_M2_eq_M_plus_P, k);
-                        #pragma omp atomic
-                        ++nos_M2;
-                    } else {
-                        assert(beamstepM2[newi].score > newscore - 1e-8);
-                    }
-
-                    ++index_M;
-                    while (index_M < sorted_bestM[k].size()) {
-                        // candidate_score is a heuristic score
-                        value_type candidate_score = M1_scores[index_P] + sorted_bestM[k][index_M].first;
-                        int candidate_newi = sorted_bestM[k][index_M].second;
-                        if (beamstepM2.find(candidate_newi) == beamstepM2.end()) {
-                            heap.push_back(make_pair(candidate_score,
-                                                    make_pair(index_P, index_M)));
-                            push_heap(heap.begin(), heap.end());
-                            break;
-                        } else {
-                            // based on the property of cube pruning, the new score must be worse
-                            // than the state already inserted
-                            // so we keep iterate through the candidate list to find the next
-                            // candidate
-                            ++index_M;
-                            assert(beamstepM2[candidate_newi].score >
-                                M1_scores[index_P] + bestM[k][candidate_newi].score - 1e-8);
-                        }
-                    }
-                }
-            }
+            } // End parallel region
         }
-
+        
         // beam of M2
         {
             if (beam > 0 && beamstepM2.size() > beam) beam_prune(beamstepM2);
@@ -2127,7 +2000,7 @@ int main(int argc, char** argv){
 
     double start_time = omp_get_wtime();
 
-    omp_set_num_threads(8);
+    //omp_set_num_threads(16);
 
     int beamsize = 100;
     bool sharpturn = false;

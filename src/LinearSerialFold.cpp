@@ -872,13 +872,11 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
         unordered_map<int, State>& beamstepM2 = bestM2[j];
         unordered_map<int, State>& beamstepM = bestM[j];
         State& beamstepC = bestC[j];
-        
+
         // beam of H
         {
-            if (beam > 0 && beamstepH.size() > beam)
-                beam_prune(beamstepH);
+            if (beam > 0 && beamstepH.size() > beam) beam_prune(beamstepH);
 
-            // 1. forward fill H(j, jnext)
             {
                 int jnext = next_pair[nucj][j];
                 if (no_sharp_turn) while (jnext - j < 4 && jnext != -1) jnext = next_pair[nucj][jnext];
@@ -902,25 +900,23 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                     value_type newscore;
 
 #ifdef lv
-                    int tetra_hex_tri = -1;
+                        int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
-                    if (jnext-j-1 == 4) // 6:tetra
-                        tetra_hex_tri = if_tetraloops[j];
-                    else if (jnext-j-1 == 6) // 8:hexa
-                        tetra_hex_tri = if_hexaloops[j];
-                    else if (jnext-j-1 == 3) // 5:tri
-                        tetra_hex_tri = if_triloops[j];
+                        if (jnext-j-1 == 4) // 6:tetra
+                            tetra_hex_tri = if_tetraloops[j];
+                        else if (jnext-j-1 == 6) // 8:hexa
+                            tetra_hex_tri = if_hexaloops[j];
+                        else if (jnext-j-1 == 3) // 5:tri
+                            tetra_hex_tri = if_triloops[j];
 #endif
-                    newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
+                        newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
 #else
-                    newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
+                        newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
 #endif
                     // this candidate must be the best one at [j, jnext]
                     // so no need to check the score
                     update_if_better(bestH[jnext][j], newscore, MANNER_H);
-
                     ++ nos_H;
-                    
                 }
             }
 
@@ -929,39 +925,26 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                 //   1. extend h(i, j) to h(i, jnext)
                 //   2. generate p(i, j)
 #ifdef lv
-                std::vector<std::pair<int, State>> keys;
                 sort_keys(beamstepH, keys);
-
-                #pragma omp parallel for schedule(static)
-                for (int idx = 0; idx < keys.size(); ++idx) {
-                    const auto& item = keys[idx];
+                for (auto &item : keys) {
 #else
-                std::vector<std::pair<int, State>> h_items;
-                h_items.reserve(beamstepH.size());
-                for (const auto& item : beamstepH)
-                    h_items.push_back(item);
-
-                #pragma omp parallel for schedule(static)
-                for (int idx = 0; idx < h_items.size(); ++idx) {
-                    const auto& item = h_items[idx];
+                for (auto &item : beamstepH) {
 #endif
                     int i = item.first;
-                    const State& state = item.second;
-
+                    // printf("%d\n", i);
+                    State &state = item.second;
                     int nuci = nucs[i];
                     int jnext = next_pair[nuci][j];
 
                     // 2. generate p(i, j)
                     // lisiz, change the order because of the constriants
                     {
-                        #pragma omp critical(update_P_from_H)
                         update_if_better(beamstepP[i], state.score, MANNER_HAIRPIN);
-
-                        #pragma omp atomic
                         ++ nos_P;
                     }
+
                     // lisiz, constraints
-                    if (jnext != -1 && use_constraints) {
+                    if (jnext != -1 && use_constraints){
                         int nucjnext = nucs[jnext];
                         if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, cons, nuci, nucjnext))
                             continue;
@@ -974,33 +957,31 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 
                         // 1. extend h(i, j) to h(i, jnext)
                         value_type newscore;
-                        #ifdef lv
-                        int tetra_hex_tri = -1;
+
+#ifdef lv
+                            int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
-                        if (jnext-i-1 == 4) // 6:tetra
-                            tetra_hex_tri = if_tetraloops[i];
-                        else if (jnext-i-1 == 6) // 8:hexa
-                            tetra_hex_tri = if_hexaloops[i];
-                        else if (jnext-i-1 == 3) // 5:tri
-                            tetra_hex_tri = if_triloops[i];
+                            if (jnext-i-1 == 4) // 6:tetra
+                                tetra_hex_tri = if_tetraloops[i];
+                            else if (jnext-i-1 == 6) // 8:hexa
+                                tetra_hex_tri = if_hexaloops[i];
+                            else if (jnext-i-1 == 3) // 5:tri
+                                tetra_hex_tri = if_triloops[i];
 #endif
-                        newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
+                            newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
 #else
-                        newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
+                            newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
 #endif
                         // this candidate must be the best one at [i, jnext]
                         // so no need to check the score
-                        #pragma omp critical(update_H_extend)
                         update_if_better(bestH[jnext][i], newscore, MANNER_H);
-                        #pragma omp atomic
                         ++nos_H;
                     }
                 }
             }
         }
+        if (j == 0) continue;
 
-        if (j == 0) continue;        
-           
         // beam of Multi
         {
             if (beam > 0 && beamstepMulti.size() > beam) beam_prune(beamstepMulti);
@@ -1009,23 +990,13 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
             //   1. extend (i, j) to (i, jnext)
             //   2. generate P (i, j)
 #ifdef lv
-            std::vector<std::pair<int, State>> keys;
             sort_keys(beamstepMulti, keys);
-            
-            #pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
+            for (auto &item : keys) {
 #else
-            std::vector<std::pair<int, State>> mu_items;
-            mu_items.reserve(beamstepMulti.size());
-            for (const auto& item : beamstepMulti) mu_items.push_back(item);
-
-            #pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < mu_items.size(); ++idx) {
-                const auto& item = mu_items[idx];
+            for(auto& item : beamstepMulti) {
 #endif
                 int i = item.first;
-                const State& state = item.second;
+                State& state = item.second;
                 int nuci = nucs[i];
                 int nuci1 = nucs[i+1];
                 int jnext = next_pair[nuci][j];
@@ -1039,11 +1010,8 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #else
                         newscore = state.score + score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
 #endif
-                        #pragma omp critical(update_P_from_Multi)
-                        update_if_better(beamstepP[i], newscore, MANNER_P_eq_MULTI);
-
-                        #pragma omp atomic
-                        ++nos_P;
+                    update_if_better(beamstepP[i], newscore, MANNER_P_eq_MULTI);
+                    ++ nos_P;
                 }
 
                 // lisiz cnstriants
@@ -1068,10 +1036,10 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #endif
                         // this candidate must be the best one at [i, jnext]
                         // so no need to check the score
-                        #pragma omp critical(update_Multi_extend)
-                        update_if_better(bestMulti[jnext][i], newscore, MANNER_MULTI_eq_MULTI_plus_U, new_l1, new_l2);
-
-                        #pragma omp atomic
+                        update_if_better(bestMulti[jnext][i], newscore, MANNER_MULTI_eq_MULTI_plus_U,
+                                         new_l1,
+                                         new_l2
+                        );
                         ++nos_Multi;
                     }
                 }
@@ -1095,23 +1063,13 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #endif               
 
 #ifdef lv
-            std::vector<std::pair<int, State>> keys;
             sort_keys(beamstepP, keys);
-            
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
+            for (auto &item : keys) {
 #else
-            std::vector<std::pair<int, State>> p_items;
-            p_items.reserve(beamstepP.size());
-            for (const auto& item : beamstepP) p_items.push_back(item);
-
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < p_items.size(); ++idx) {
-                const auto& item = p_items[idx];
+            for(auto& item : beamstepP) {
 #endif
                 int i = item.first;
-                const State& state = item.second;
+                State& state = item.second;
                 int nuci = nucs[i];
                 int nuci_1 = (i-1>-1) ? nucs[i-1] : -1;
 
@@ -1123,10 +1081,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #else
                         newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #endif
-                    #pragma omp critical(update_M_eq_P)
                     update_if_better(beamstepM[i], newscore, MANNER_M_eq_P);
-
-                    #pragma omp atomic
                     ++ nos_M;
                 }
                 //printf(" M = P at %d\n", j); fflush(stdout);
@@ -1148,10 +1103,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                                 int newi = m.first;
                                 // eq. to first convert P to M1, then M2/M = M + M1
                                 value_type newscore = M1_score + m.second.score;
-
-                                #pragma omp critical(update_M2_from_MP)
                                 update_if_better(beamstepM2[newi], newscore, MANNER_M2_eq_M_plus_P, k);
-                                #pragma omp atomic
                                 ++nos_M2;
                             }
 #else
@@ -1160,11 +1112,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                                 int newi = m.first;
                                 // eq. to first convert P to M1, then M2/M = M + M1
                                 value_type newscore = M1_score + m.second.score;
-
-                                #pragma omp critical(update_M2_from_MP)
                                 update_if_better(beamstepM2[newi], newscore, MANNER_M2_eq_M_plus_P, k);
-
-                                #pragma omp atomic
                                 ++nos_M2;
                             }
                         }
@@ -1177,8 +1125,8 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                 {
                     int k = i - 1;
                     if (k >= 0) {
-                    State& prefix_C = bestC[k];
-                    if (prefix_C.manner != MANNER_NONE) {
+                      State& prefix_C = bestC[k];
+                      if (prefix_C.manner != MANNER_NONE) {
                         int nuck = nuci_1;
                         int nuck1 = nuci;
                         value_type newscore;
@@ -1189,12 +1137,9 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                             newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length) +
                                 prefix_C.score + state.score;
 #endif
-                        #pragma omp critical(update_C_from_C_plus_P)
                         update_if_better(beamstepC, newscore, MANNER_C_eq_C_plus_P, k);
-
-                        #pragma omp atomic
                         ++ nos_C;
-                    }
+                      }
                     } else {
                         value_type newscore;
 #ifdef lv
@@ -1202,10 +1147,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #else
                             newscore = score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length) + state.score;
 #endif
-                        #pragma omp critical(update_C_from_C_plus_P_start)
                         update_if_better(beamstepC, newscore, MANNER_C_eq_C_plus_P, -1);
-
-                        #pragma omp atomic
                         ++ nos_C;
                     }
                 }
@@ -1259,10 +1201,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #else
                                     newscore = score_helix(nucp, nucp1, nucq_1, nucq) + state.score;
 #endif
-                                #pragma omp critical(update_helix_P)
                                 update_if_better(bestP[q][p], newscore, MANNER_HELIX);
-
-                                #pragma omp atomic
                                 ++nos_P;
                             } else {
                                 // single branch
@@ -1276,12 +1215,9 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                                         score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1) +
                                         state.score;
 #endif
-                                #pragma omp critical(update_single_P)
                                 update_if_better(bestP[q][p], newscore, MANNER_SINGLE,
-                                                static_cast<char>(i - p),
-                                                q - j);
-
-                                #pragma omp atomic
+                                                 static_cast<char>(i - p),
+                                                 q - j);
                                 ++nos_P;
                             }
                             q = next_pair[nucp][q];
@@ -1290,29 +1226,19 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                 }
             }
 
-            // lhuang: check j < n-1
+	    // lhuang: check j < n-1
             if (use_cube_pruning && j < seq_length - 1) {
                 // 3. M2 = M + P with cube pruning
                 vector<int> valid_Ps;
                 vector<value_type> M1_scores;
 #ifdef lv
-            std::vector<std::pair<int, State>> keys;
             sort_keys(beamstepP, keys);
-
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
+            for (auto &item : keys) {
 #else
-            std::vector<std::pair<int, State>> p_items;
-            p_items.reserve(beamstepP.size());
-            for (const auto& item : beamstepP) p_items.push_back(item);
-
-            //#pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < p_items.size(); ++idx) {
-                const auto& item = p_items[idx];
+            for(auto& item : beamstepP) {
 #endif
                     int i = item.first;
-                    const State &state = item.second;
+                    State &state = item.second;
                     int nuci = nucs[i];
                     int nuci_1 = (i - 1 > -1) ? nucs[i - 1] : -1;
                     int k = i - 1;
@@ -1346,7 +1272,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                     int i = valid_Ps[p];
                     int k = i - 1;
                     heap.push_back(make_pair(M1_scores[p] + sorted_bestM[k][0].first,
-                                            make_pair(p, 0)
+                                             make_pair(p, 0)
                     ));
                     push_heap(heap.begin(), heap.end());
                 }
@@ -1372,9 +1298,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 
                     if (beamstepM2[newi].manner == MANNER_NONE) {
                         ++filled;
-                        #pragma omp critical(update_M2_eq_M_plus_P)
                         update_if_better(beamstepM2[newi], newscore, MANNER_M2_eq_M_plus_P, k);
-                        #pragma omp atomic
                         ++nos_M2;
                     } else {
                         assert(beamstepM2[newi].score > newscore - 1e-8);
@@ -1387,7 +1311,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                         int candidate_newi = sorted_bestM[k][index_M].second;
                         if (beamstepM2.find(candidate_newi) == beamstepM2.end()) {
                             heap.push_back(make_pair(candidate_score,
-                                                    make_pair(index_P, index_M)));
+                                                     make_pair(index_P, index_M)));
                             push_heap(heap.begin(), heap.end());
                             break;
                         } else {
@@ -1397,7 +1321,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                             // candidate
                             ++index_M;
                             assert(beamstepM2[candidate_newi].score >
-                                M1_scores[index_P] + bestM[k][candidate_newi].score - 1e-8);
+                                   M1_scores[index_P] + bestM[k][candidate_newi].score - 1e-8);
                         }
                     }
                 }
@@ -1412,30 +1336,17 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
             //   1. multi-loop  (by extending M2 on the left)
             //   2. M = M2
 #ifdef lv
-            std::vector<std::pair<int, State>> keys;
             sort_keys(beamstepM2, keys);
-            
-            #pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
+            for (auto &item : keys) {
 #else
-            std::vector<std::pair<int, State>> m2_items;
-            m2_items.reserve(beamstepM2.size());
-            for (const auto& item : beamstepM2) m2_items.push_back(item);
-
-            #pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < m2_items.size(); ++idx) {
-                const auto& item = m2_items[idx];
+            for(auto& item : beamstepM2) {
 #endif
                 int i = item.first;
-                const State& state = item.second;
+                State& state = item.second;
 
                 // 2. M = M2
                 {
-                    #pragma omp critical(update_M_eq_M2)
                     update_if_better(beamstepM[i], state.score, MANNER_M_eq_M2);
-                    
-                    #pragma omp atomic
                     ++ nos_M;
                 }
 
@@ -1470,11 +1381,9 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                                 newscore = score_multi_unpaired(p+1, i-1) +
                                     score_multi_unpaired(j+1, q-1) + state.score;
 #endif
-                            #pragma omp critical(update_Multi_from_M2)
                             update_if_better(bestMulti[q][p], newscore, MANNER_MULTI,
-                                            static_cast<char>(i - p),
-                                            q - j);
-                            #pragma omp atomic
+                                             static_cast<char>(i - p),
+                                             q - j);
                             ++ nos_Multi;
                         }
                     }
@@ -1495,23 +1404,13 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
             // for every state in M[j]
             //   1. M = M + unpaired
 #ifdef lv
-            std::vector<std::pair<int, State>> keys;
             sort_keys(beamstepM, keys);
-            
-            #pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < keys.size(); ++idx) {
-                const auto& item = keys[idx];
+            for (auto &item : keys) {
 #else
-            std::vector<std::pair<int, State>> m_items;
-            m_items.reserve(beamstepM.size());
-            for (const auto& item : beamstepM) m_items.push_back(item);
-
-            #pragma omp parallel for schedule(static)
-            for (int idx = 0; idx < m_items.size(); ++idx) {
-                const auto& item = m_items[idx];
+            for(auto& item : beamstepM) {
 #endif
                 int i = item.first;
-                const State& state = item.second;
+                State& state = item.second;
                 if (j < seq_length-1) {
                     if (use_constraints && !allow_unpaired_position[j+1]) // if j+1 must be paired
                         continue;
@@ -1521,15 +1420,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #else
                         newscore = score_multi_unpaired(j + 1, j + 1) + state.score;
 #endif
-                    #pragma omp critical(update_M_extend)
                     update_if_better(bestM[j+1][i], newscore, MANNER_M_eq_M_plus_U);
-                    
-                    #pragma omp atomic
                     ++ nos_M;
                 }
             }
         }
-        
+
         // beam of C
         {
             // C = C + U
@@ -1546,6 +1442,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                 ++ nos_C;
             }
         }
+
     }  // end of for-loo j
 
     State& viterbi = bestC[seq_length-1];
@@ -1722,324 +1619,250 @@ void BeamCKYParser::outside(vector<int> next_pair[]){
         }
 
         if (j == 0) break; //for updating bestC_beta[0], then break need: for(int j = seq_length-1; |||||j >= 0||||; --j) {
-        
+    
+        // beam of M
         {
-            // beam of M
-            {
-                vector<int> m_keys;
-                for (auto const& kv: beamstepM) {
-                    m_keys.push_back(kv.first);
-                }
+            for(auto& item : beamstepM) {
 
-                #pragma omp parallel for schedule(static)
-                for (int idx = 0; idx < m_keys.size(); idx++) {
-                    int i = m_keys[idx];
-                    State& state = beamstepM_beta[i];
+                int i = item.first;
+                State& state = beamstepM_beta[i];
 
 
-                    if (j < seq_length-1) {
-    #ifdef lv            
-                        if (bestM_beta[j+1][i].manner != 0){
-                            #pragma omp critical(update_state_m)
-                            {
-                                update_if_better(state, bestM_beta[j+1][i].score, MANNER_M_eq_M_plus_U);
-                            }
-                        }
-    #else
-                        if (bestM_beta[j+1][i].manner != 0){
-                            newscore = score_multi_unpaired(j + 1, j + 1);
-                            #pragma omp critical(update_state_m)
-                            {
-                                update_if_better(state, bestM_beta[j+1][i].score + newscore, MANNER_M_eq_M_plus_U);
-                            }
-                        }
-    #endif
+                if (j < seq_length-1) {
+#ifdef lv            
+                    if (bestM_beta[j+1][i].manner != 0){
+                        update_if_better(state, bestM_beta[j+1][i].score, MANNER_M_eq_M_plus_U);
                     }
+#else
+                    if (bestM_beta[j+1][i].manner != 0){
+                        newscore = score_multi_unpaired(j + 1, j + 1);
+                        update_if_better(state, bestM_beta[j+1][i].score + newscore, MANNER_M_eq_M_plus_U);
+                    }
+#endif
                 }
             }
+        }
 
-            // beam of M2
-            {
-                vector<int> m2_keys;
-                for (auto const& kv: beamstepM2) {
-                    m2_keys.push_back(kv.first);
+        // beam of M2
+        {
+            for(auto& item : beamstepM2) {
+                int i = item.first;
+                State& state = beamstepM2_beta[i];
+
+                // 1. multi-loop
+                {
+                    for (int p = i-1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                        int nucp = nucs[p];
+                        int q = next_pair[nucp][j];
+                        if (q != -1 && ((i - p - 1) <= SINGLE_MAX_LEN)) {
+#ifdef lv
+                            if (bestMulti_beta[q][p].manner != 0){
+                                update_if_better(state, bestMulti_beta[q][p].score, MANNER_MULTI, static_cast<char>(i - p), q - j);
+                            }
+#else
+     
+                            if (bestMulti_beta[q][p].manner != 0){
+                                newscore = score_multi_unpaired(p+1, i-1) + score_multi_unpaired(j+1, q-1);
+                                update_if_better(state, bestMulti_beta[q][p].score + newscore, MANNER_MULTI, static_cast<char>(i - p), q - j);
+                            }
+#endif
+                        }
+                    }
                 }
 
-                #pragma omp parallel for schedule(static)
-                for (int idx = 0; idx < m2_keys.size(); idx++) {
-                    int i = m2_keys[idx];
-                    State& state = beamstepM2_beta[i];
-
-                    // 1. multi-loop
-                    {
-                        for (int p = i-1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
-                            int nucp = nucs[p];
-                            int q = next_pair[nucp][j];
-                            if (q != -1 && ((i - p - 1) <= SINGLE_MAX_LEN)) {
-    #ifdef lv
-                                if (bestMulti_beta[q][p].manner != 0){
-                                    #pragma omp critical(update_state_multi)
-                                    {
-                                        update_if_better(state, bestMulti_beta[q][p].score, MANNER_MULTI, static_cast<char>(i - p), q - j);
-                                    }
-                                }
-    #else
-        
-                                if (bestMulti_beta[q][p].manner != 0){
-                                    newscore = score_multi_unpaired(p+1, i-1) + score_multi_unpaired(j+1, q-1);
-                                    #pragma omp critical(update_state_multi)
-                                    {
-                                        update_if_better(state, bestMulti_beta[q][p].score + newscore, MANNER_MULTI, static_cast<char>(i - p), q - j);
-                                    }
-                                }
-    #endif
-                            }
-                        }
-                    }
-
-                    // 2. M = M2
-                    if (beamstepM_beta[i].manner != 0){
-                        #pragma omp critical(update_state_m2)
-                        {
-                            update_if_better(state, beamstepM_beta[i].score, MANNER_M_eq_M2);
-                        }
-                    }
+                // 2. M = M2
+                if (beamstepM_beta[i].manner != 0){
+                    update_if_better(state, beamstepM_beta[i].score, MANNER_M_eq_M2);
                 }
             }
-            
-            // beam of P
-            {  
-                vector<int> p_keys;
-                for (auto const& kv: beamstepP) {
-                    p_keys.push_back(kv.first);
-                }
-
-                #pragma omp parallel for schedule(static)
-                for (int idx = 0; idx < p_keys.size(); idx++) {
-                    int i = p_keys[idx];
-                    State& state = beamstepP_beta[i];
-                    auto state_alpha = beamstepP[i].score; //for subopt zuker
+        }
+        // beam of P
+        {  
+            for(auto& item : beamstepP) {
+                int i = item.first;
+                State& state = beamstepP_beta[i];
+                auto state_alpha = item.second.score; //for subopt zuker
 
 
-                    int nuci = nucs[i];
-                    int nuci_1 = (i-1>-1) ? nucs[i-1] : -1;
+                int nuci = nucs[i];
+                int nuci_1 = (i-1>-1) ? nucs[i-1] : -1;
 
-                    if (i >0 && j<seq_length-1) {
-    #ifndef lv
-                        value_type precomputed = score_junction_B(j, i, nucj, nucj1, nuci_1, nuci);
-    #endif
-                        for (int p = i - 1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
-                            int nucp = nucs[p];
-                            int nucp1 = nucs[p + 1]; 
-                            int q = next_pair[nucp][j];
+                if (i >0 && j<seq_length-1) {
+#ifndef lv
+                    value_type precomputed = score_junction_B(j, i, nucj, nucj1, nuci_1, nuci);
+#endif
+                    for (int p = i - 1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                        int nucp = nucs[p];
+                        int nucp1 = nucs[p + 1]; 
+                        int q = next_pair[nucp][j];
 
-                            while (q != -1 && ((i - p) + (q - j) - 2 <= SINGLE_MAX_LEN)) {
-                                int nucq = nucs[q];
-                                int nucq_1 = nucs[q - 1];
+                        while (q != -1 && ((i - p) + (q - j) - 2 <= SINGLE_MAX_LEN)) {
+                            int nucq = nucs[q];
+                            int nucq_1 = nucs[q - 1];
 
-                                if (p == i - 1 && q == j + 1) {
-                                    // helix
-    #ifdef lv
+                            if (p == i - 1 && q == j + 1) {
+                                // helix
+#ifdef lv
+                                
+                                if (bestP_beta[q][p].manner != 0){
+                                    int score_single = -v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1);
                                     
-                                    if (bestP_beta[q][p].manner != 0){
-                                        int score_single = -v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1);
-                                        
-                                        // SHAPE for Vienna only
-                                        if (use_shape)
-                                        {
-                                            score_single += -(pseudo_energy_stack[p] + pseudo_energy_stack[i] + pseudo_energy_stack[j] + pseudo_energy_stack[q]);
-                                        }
-
-                                        #pragma omp critical(update_state_p)
-                                        {
-                                            update_if_better(state, (bestP_beta[q][p].score + score_single), MANNER_HELIX, static_cast<char>(i - p), q - j);
-                                        }
-                                    }
-    #else
-                                    if (bestP_beta[q][p].manner != 0){    
-                                        newscore = score_helix(nucp, nucp1, nucq_1, nucq);
-                                        #pragma omp critical(update_state_p)
-                                        {
-                                            update_if_better(state, bestP_beta[q][p].score + newscore, MANNER_HELIX, static_cast<char>(i - p), q - j);
-                                        }
+                                    // SHAPE for Vienna only
+                                    if (use_shape)
+                                    {
+                                        score_single += -(pseudo_energy_stack[p] + pseudo_energy_stack[i] + pseudo_energy_stack[j] + pseudo_energy_stack[q]);
                                     }
 
-    #endif
-                                } else {
-                                    // single branch
-    #ifdef lv
-                                    if  (bestP_beta[q][p].manner != 0){   
-                                        int score_single = - v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1);
-                                        #pragma omp critical(update_state_p)
-                                        {
-                                            update_if_better(state, (bestP_beta[q][p].score + score_single), MANNER_SINGLE, static_cast<char>(i - p), q - j);
-                                        }
-                                    }
-    #else
-                                    if (bestP_beta[q][p].manner != 0){    
-                                        newscore = score_junction_B(p, q, nucp, nucp1, nucq_1, nucq) + precomputed + score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1);
-                                        #pragma omp critical(update_state_p)
-                                        {
-                                            update_if_better(state, bestP_beta[q][p].score + newscore, MANNER_SINGLE, static_cast<char>(i - p), q - j);
-                                        }
-                                    }
-
-    #endif
+                                    update_if_better(state, (bestP_beta[q][p].score + score_single), MANNER_HELIX, static_cast<char>(i - p), q - j);
                                 }
-                                q = next_pair[nucp][q]; //beam search, q is not a key in bestP_beta[q], does not mean new q is not a key
+#else
+                                if (bestP_beta[q][p].manner != 0){    
+                                    newscore = score_helix(nucp, nucp1, nucq_1, nucq);
+                                    update_if_better(state, bestP_beta[q][p].score + newscore, MANNER_HELIX, static_cast<char>(i - p), q - j);
+                                }
+
+#endif
+                            } else {
+                                // single branch
+#ifdef lv
+                                if  (bestP_beta[q][p].manner != 0){   
+                                    int score_single = - v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1);
+                                    update_if_better(state, (bestP_beta[q][p].score + score_single), MANNER_SINGLE, static_cast<char>(i - p), q - j);
+                                }
+#else
+                                if (bestP_beta[q][p].manner != 0){    
+                                    newscore = score_junction_B(p, q, nucp, nucp1, nucq_1, nucq) + precomputed + score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1);
+                                    update_if_better(state, bestP_beta[q][p].score + newscore, MANNER_SINGLE, static_cast<char>(i - p), q - j);
+                                }
+
+#endif
                             }
+                            q = next_pair[nucp][q]; //beam search, q is not a key in bestP_beta[q], does not mean new q is not a key
                         }
                     }
+                }
 
-                    // assert(check());
+                // assert(check());
 
-                    // 2. M = P
-                    if(i > 0 && j < seq_length-1){
+                // 2. M = P
+                if(i > 0 && j < seq_length-1){
 
-    #ifdef lv
-                            if (beamstepM_beta[i].manner != 0){
-                                int score_M1 = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model);
-                                #pragma omp critical(update_state_m)
-                                {
-                                    update_if_better(state, (beamstepM_beta[i].score + score_M1), MANNER_M_eq_P);
-                                }
-                            }
-    #else
-                            if (beamstepM_beta[i].manner != 0){    
-                                newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
-                                #pragma omp critical(update_state_m)
-                                {
-                                    update_if_better(state, beamstepM_beta[i].score + newscore, MANNER_M_eq_P);
-                                }
-                            }
-    #endif
+#ifdef lv
+                        if (beamstepM_beta[i].manner != 0){
+                            int score_M1 = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model);
+                            update_if_better(state, (beamstepM_beta[i].score + score_M1), MANNER_M_eq_P);
+                        }
+#else
+                        if (beamstepM_beta[i].manner != 0){    
+                            newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
+                            update_if_better(state, beamstepM_beta[i].score + newscore, MANNER_M_eq_P);
+                        }
+#endif
+                }
+                // 3. M2 = M + P
+                int k = i - 1;
+                if ( k > 0 && !bestM[k].empty()) {
+#ifdef lv
+                    int M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model);
+                    float m1_alpha = M1_score;
+#else
+                    newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
+                    float m1_alpha = newscore;
+#endif
+                    
+                    float m1_plus_P_alpha = state_alpha + m1_alpha;
+                    for (auto &m : bestM[k]) {
+                        int newi = m.first;
+                        State& m_state = bestM_beta[k][newi];
+
+                        auto m_state_alpha = m.second.score;
+                        if (beamstepM2_beta[newi].manner != 0){
+                            update_if_better(m_state, (beamstepM2_beta[newi].score + m1_plus_P_alpha), MANNER_M2_eq_M_plus_P, j); //newi, k = i-1, i, j
+                            update_if_better(state, (beamstepM2_beta[newi].score + m_state_alpha + m1_alpha), MANNER_M2_eq_M_plus_P, newi); // newi, k = i-1, i, j
+                        }
                     }
-                    // 3. M2 = M + P
+                }
+                // 4. C = C + P
+                {   
                     int k = i - 1;
-                    if ( k > 0 && !bestM[k].empty()) {
-    #ifdef lv
-                        int M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length, dangle_model);
-                        float m1_alpha = M1_score;
-    #else
-                        newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
-                        float m1_alpha = newscore;
-    #endif
-                        
-                        float m1_plus_P_alpha = state_alpha + m1_alpha;
-                        for (auto &m : bestM[k]) {
-                            int newi = m.first;
-                            State& m_state = bestM_beta[k][newi];
+                    if (k >= 0) {
+                        int nuck = nuci_1;
+                        int nuck1 = nuci;
 
-                            auto m_state_alpha = m.second.score;
-                            if (beamstepM2_beta[newi].manner != 0){
-                                update_if_better(m_state, (beamstepM2_beta[newi].score + m1_plus_P_alpha), MANNER_M2_eq_M_plus_P, j); //newi, k = i-1, i, j
-                                update_if_better(state, (beamstepM2_beta[newi].score + m_state_alpha + m1_alpha), MANNER_M2_eq_M_plus_P, newi); // newi, k = i-1, i, j
-                            }
-                        }
-                    }
-                    // 4. C = C + P
-                    {   
-                        int k = i - 1;
-                        if (k >= 0) {
-                            int nuck = nuci_1;
-                            int nuck1 = nuci;
+#ifdef lv
+                        int score_external_paired = - v_score_external_paired(k+1, j, nuck, nuck1,
+                                                                 nucj, nucj1, seq_length, dangle_model);
 
-    #ifdef lv
-                            int score_external_paired = - v_score_external_paired(k+1, j, nuck, nuck1,
-                                                                    nucj, nucj1, seq_length, dangle_model);
+                        float external_paired_alpha_plus_beamstepC_beta = beamstepC_beta.score + score_external_paired;
 
-                            float external_paired_alpha_plus_beamstepC_beta = beamstepC_beta.score + score_external_paired;
+#else
+                        newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
+                        float external_paired_alpha_plus_beamstepC_beta = beamstepC_beta.score + newscore;
+#endif
 
-    #else
-                            newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
-                            float external_paired_alpha_plus_beamstepC_beta = beamstepC_beta.score + newscore;
-    #endif
+                        update_if_better(bestC_beta[k], state_alpha + external_paired_alpha_plus_beamstepC_beta, MANNER_C_eq_C_plus_P, j); //0, k, i, j
+                        update_if_better(state, bestC[k].score + external_paired_alpha_plus_beamstepC_beta, MANNER_C_eq_C_plus_P, -1); // 0, k, i, j
 
-                            update_if_better(bestC_beta[k], state_alpha + external_paired_alpha_plus_beamstepC_beta, MANNER_C_eq_C_plus_P, j); //0, k, i, j
-                            update_if_better(state, bestC[k].score + external_paired_alpha_plus_beamstepC_beta, MANNER_C_eq_C_plus_P, -1); // 0, k, i, j
+                    } else {
 
-                        } else {
+#ifdef lv
+                        int score_external_paired = - v_score_external_paired(0, j, -1, nucs[0],
+                                                                 nucj, nucj1, seq_length, dangle_model);
+                        update_if_better(state, (beamstepC_beta.score + score_external_paired), MANNER_C_eq_C_plus_P, -1); //C does not exist
+#else
+                        newscore = score_external_paired(0, j, -1, nucs[0],
+                                                             nucj, nucj1, seq_length);
+                        update_if_better(state, beamstepC_beta.score + newscore, MANNER_C_eq_C_plus_P, -1); //C does not exist
 
-    #ifdef lv
-                            int score_external_paired = - v_score_external_paired(0, j, -1, nucs[0],
-                                                                    nucj, nucj1, seq_length, dangle_model);
-                            update_if_better(state, (beamstepC_beta.score + score_external_paired), MANNER_C_eq_C_plus_P, -1); //C does not exist
-    #else
-                            newscore = score_external_paired(0, j, -1, nucs[0],
-                                                                nucj, nucj1, seq_length);
-                            
-                            #pragma omp critical(update_state_c)
-                            {
-                                update_if_better(state, beamstepC_beta.score + newscore, MANNER_C_eq_C_plus_P, -1); //C does not exist
-                            }
-    #endif
-                        }
+#endif
                     }
                 }
             }
+        }
 
-            // beam of Multi
-            {
-                vector<int> multi_keys;
-                for (auto const& kv: beamstepMulti) {
-                    multi_keys.push_back(kv.first);
-                }
+        // beam of Multi
+        {
+            for(auto& item : beamstepMulti) {
+                int i = item.first;
+                State& state = beamstepMulti_beta[i];
 
-                #pragma omp parallel for schedule(static)
-                for (int idx = 0; idx < multi_keys.size(); idx++) {
-                    int i = multi_keys[idx];
-                    State& state = beamstepMulti_beta[i];
+                int nuci = nucs[i];
+                int nuci1 = nucs[i+1];
+                int jnext = next_pair[nuci][j];
 
-                    int nuci = nucs[i];
-                    int nuci1 = nucs[i+1];
-                    int jnext = next_pair[nuci][j];
+                // 1. extend (i, j) to (i, jnext)
+                {
+                    if (jnext != -1) {
 
-                    // 1. extend (i, j) to (i, jnext)
-                    {
-                        if (jnext != -1) {
-
-    #ifdef lv
-                            if (bestMulti_beta[jnext][i].manner != 0){
-                                #pragma omp critical(update_state_multi)
-                                {
-                                    update_if_better(state, (bestMulti_beta[jnext][i].score), MANNER_MULTI_eq_MULTI_plus_U, jnext - j);
-                                }
-                            }
-    #else
-                            if (bestMulti_beta[jnext][i].manner != 0){
-                                newscore = score_multi_unpaired(j, jnext - 1);
-                                #pragma omp critical(update_state_multi)
-                                {
-                                    update_if_better(state, bestMulti_beta[jnext][i].score + newscore, MANNER_MULTI_eq_MULTI_plus_U, jnext - j);
-                                }
-                            }
-    #endif
+#ifdef lv
+                        if (bestMulti_beta[jnext][i].manner != 0){
+                            update_if_better(state, (bestMulti_beta[jnext][i].score), MANNER_MULTI_eq_MULTI_plus_U, jnext - j);
                         }
-                    }
-
-                    // 2. generate P (i, j)
-                    {
-    #ifdef lv
-                        if (beamstepP_beta[i].manner != 0){
-                            int score_multi = - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length, dangle_model);
-                            #pragma omp critical(update_state_p)
-                            {
-                                update_if_better(state, (beamstepP_beta[i].score + score_multi), MANNER_P_eq_MULTI);
-                            }
+#else
+                        if (bestMulti_beta[jnext][i].manner != 0){
+                            newscore = score_multi_unpaired(j, jnext - 1);
+                            update_if_better(state, bestMulti_beta[jnext][i].score + newscore, MANNER_MULTI_eq_MULTI_plus_U, jnext - j);
                         }
-    #else    
-                        if (beamstepP_beta[i].manner != 0){
-                            newscore = score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
-                            #pragma omp critical(update_state_p)
-                            {
-                                update_if_better(state, beamstepP_beta[i].score + newscore, MANNER_P_eq_MULTI);
-                            }
-                        }
-
-    #endif
+#endif
                     }
                 }
-            }   
+
+                // 2. generate P (i, j)
+                {
+#ifdef lv
+                    if (beamstepP_beta[i].manner != 0){
+                        int score_multi = - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length, dangle_model);
+                        update_if_better(state, (beamstepP_beta[i].score + score_multi), MANNER_P_eq_MULTI);
+                    }
+#else    
+                    if (beamstepP_beta[i].manner != 0){
+                        newscore = score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
+                        update_if_better(state, beamstepP_beta[i].score + newscore, MANNER_P_eq_MULTI);
+                    }
+
+#endif
+                }
+            }
         }
         
     }  // end of for-loo j
@@ -2127,8 +1950,6 @@ int main(int argc, char** argv){
 
     double start_time = omp_get_wtime();
 
-    omp_set_num_threads(8);
-
     int beamsize = 100;
     bool sharpturn = false;
     bool is_verbose = false;
@@ -2162,6 +1983,7 @@ int main(int argc, char** argv){
         printf("In constraint mode, SHAPE-guided structure prediction feature is disabled!\n");
         shape_file_path = "";
     }
+
 
     // variables for decoding
     int num=0, total_len = 0;

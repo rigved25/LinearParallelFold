@@ -886,11 +886,11 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                 // lisiz, constriants
                 if (use_constraints){
                     if (!allow_unpaired_position[j]){
-                        jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
+                        jnext = (*cons)[j] > j ? (*cons)[j] : -1;
                     }
                     if (jnext != -1){
                         int nucjnext = nucs[jnext];
-                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
+                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))
                             jnext = -1;
                     }
                 }
@@ -900,7 +900,6 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                     int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
                     value_type newscore;
-
 #ifdef lv
                     int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
@@ -917,8 +916,10 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 #endif
                     // this candidate must be the best one at [j, jnext]
                     // so no need to check the score
+                    #pragma omp critical(update_H_forward)
                     update_if_better(bestH[jnext][j], newscore, MANNER_H);
 
+                    #pragma omp atomic
                     ++ nos_H;
                     
                 }
@@ -2127,7 +2128,7 @@ int main(int argc, char** argv){
 
     double start_time = omp_get_wtime();
 
-    omp_set_num_threads(8);
+    //omp_set_num_threads(16);
 
     int beamsize = 100;
     bool sharpturn = false;

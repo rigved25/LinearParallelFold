@@ -2127,7 +2127,7 @@ int main(int argc, char** argv){
 
     double start_time = omp_get_wtime();
 
-    omp_set_num_threads(8);
+    //omp_set_num_threads(16);
 
     int beamsize = 100;
     bool sharpturn = false;
