@@ -890,116 +890,116 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 
     double total_timeH = 0.0;
 
-    // double t_start = omp_get_wtime();
+    double t_start = omp_get_wtime();
 
-//     #pragma omp parallel for schedule(static)
-//     for(int j = 0; j < seq_length; ++j) {
-//         vector<State>& beamstepH = bestH[j];
-//         int nucj = nucs[j];
-//         int nucj1 = (j+1) < seq_length ? nucs[j+1] : -1;
+    #pragma omp parallel for schedule(static)
+    for(int j = 0; j < seq_length; ++j) {
+        int nucj = nucs[j];
+        int nucj1 = (j+1) < seq_length ? nucs[j+1] : -1;
+        int jnext = next_pair[nucj][j];
+        if (no_sharp_turn) while (jnext - j < 4 && jnext != -1) jnext = next_pair[nucj][jnext];
 
-//         // if (beam > 0 && beamstepH.size() > beam) beam_prune(j, beamstepH);
+        // lisiz, constriants
+        if (use_constraints){
+            if (!allow_unpaired_position[j]){
+                jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
+            }
+            if (jnext != -1){
+                int nucjnext = nucs[jnext];
+                if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
+                    jnext = -1;
+            }
+        }
 
-//         {
-//             int jnext = next_pair[nucj][j];
-//             if (no_sharp_turn) while (jnext - j < 4 && jnext != -1) jnext = next_pair[nucj][jnext];
+        if (jnext != -1) {
+            int nucjnext = nucs[jnext];
+            int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
-//             // lisiz, constriants
-//             if (use_constraints){
-//                 if (!allow_unpaired_position[j]){
-//                     jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
-//                 }
-//                 if (jnext != -1){
-//                     int nucjnext = nucs[jnext];
-//                     if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
-//                         jnext = -1;
-//                 }
-//             }
+            value_type newscore;
 
-//             if (jnext != -1) {
-//                 int nucjnext = nucs[jnext];
-//                 int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
+#ifdef lv
+                int tetra_hex_tri = -1;
+#ifdef SPECIAL_HP
+                if (jnext-j-1 == 4) // 6:tetra
+                    tetra_hex_tri = if_tetraloops[j];
+                else if (jnext-j-1 == 6) // 8:hexa
+                    tetra_hex_tri = if_hexaloops[j];
+                else if (jnext-j-1 == 3) // 5:tri
+                    tetra_hex_tri = if_triloops[j];
+#endif
+                newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
+#else
+                newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
+#endif
+            // this candidate must be the best one at [j, jnext]
+            // so no need to check the score
 
-//                 value_type newscore;
+            update_if_better(bestH[jnext][j], newscore, MANNER_H);
+            //++ nos_H;
+        }
+    }
 
-// #ifdef lv
-//                     int tetra_hex_tri = -1;
-// #ifdef SPECIAL_HP
-//                     if (jnext-j-1 == 4) // 6:tetra
-//                         tetra_hex_tri = if_tetraloops[j];
-//                     else if (jnext-j-1 == 6) // 8:hexa
-//                         tetra_hex_tri = if_hexaloops[j];
-//                     else if (jnext-j-1 == 3) // 5:tri
-//                         tetra_hex_tri = if_triloops[j];
-// #endif
-//                     newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
-// #else
-//                     newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
-// #endif
-//                 // this candidate must be the best one at [j, jnext]
-//                 // so no need to check the score
+    #pragma omp parallel for schedule(static)
+    for(int j = 0; j < seq_length; ++j) {
+        int nucj = nucs[j];
+        int nucj1 = (j+1) < seq_length ? nucs[j+1] : -1;
 
-//                 update_if_better(bestH[jnext][j], newscore, MANNER_H);
-//                 //++ nos_H;
-//             }
-//         }
+        vector<State>& beamstepH = bestH[j];
+        if (beam > 0 && beamstepH.size() > beam) beam_prune(j, beamstepH);
 
-//         #pragma omp parallel for schedule(static)
-//         for (int i = 0; i <= j; ++i) {
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i <= j; ++i) {
 
-//             State &state = bestH[j][i];
-//             if(state.score != VALUE_MIN)
-//             {
+            State &state = bestH[j][i];
+            if(state.score != VALUE_MIN)
+            {
                 
-//                 int nuci = nucs[i];
-//                 int jnext = next_pair[nuci][j];
+                int nuci = nucs[i];
+                int jnext = next_pair[nuci][j];
                 
-//                 // lisiz, constraints
-//                 if (jnext != -1 && use_constraints){
-//                     int nucjnext = nucs[jnext];
-//                     if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, cons, nuci, nucjnext))
-//                         continue;
-//                 }
+                // lisiz, constraints
+                if (jnext != -1 && use_constraints){
+                    int nucjnext = nucs[jnext];
+                    if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, cons, nuci, nucjnext))
+                        continue;
+                }
 
-//                 if (jnext != -1) {
-//                     int nuci1 = (i + 1) < seq_length ? nucs[i + 1] : -1;
-//                     int nucjnext = nucs[jnext];
-//                     int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
+                if (jnext != -1) {
+                    int nuci1 = (i + 1) < seq_length ? nucs[i + 1] : -1;
+                    int nucjnext = nucs[jnext];
+                    int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
-//                     // 1. extend h(i, j) to h(i, jnext)
-//                     value_type newscore;
+                    // 1. extend h(i, j) to h(i, jnext)
+                    value_type newscore;
 
-// #ifdef lv
-//                         int tetra_hex_tri = -1;
-// #ifdef SPECIAL_HP
-//                         if (jnext-i-1 == 4) // 6:tetra
-//                             tetra_hex_tri = if_tetraloops[i];
-//                         else if (jnext-i-1 == 6) // 8:hexa
-//                             tetra_hex_tri = if_hexaloops[i];
-//                         else if (jnext-i-1 == 3) // 5:tri
-//                             tetra_hex_tri = if_triloops[i];
-// #endif
-//                         newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
-// #else
-//                         newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
-// #endif
-//                     // this candidate must be the best one at [i, jnext]
-//                     // so no need to check the score
-//                     update_if_better(bestH[jnext][i], newscore, MANNER_H);
-//                     //++nos_H;
-//                 }
-//             }
-//         }
+#ifdef lv
+                        int tetra_hex_tri = -1;
+#ifdef SPECIAL_HP
+                        if (jnext-i-1 == 4) // 6:tetra
+                            tetra_hex_tri = if_tetraloops[i];
+                        else if (jnext-i-1 == 6) // 8:hexa
+                            tetra_hex_tri = if_hexaloops[i];
+                        else if (jnext-i-1 == 3) // 5:tri
+                            tetra_hex_tri = if_triloops[i];
+#endif
+                        newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
+#else
+                        newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
+#endif
+                    // this candidate must be the best one at [i, jnext]
+                    // so no need to check the score
+                    update_if_better(bestH[jnext][i], newscore, MANNER_H);
+                    //++nos_H;
+                }
+            }
+        }
+    }
 
-//         if (beam > 0 && beamstepH.size() > beam) beam_prune(j, beamstepH);
+    double t_end = omp_get_wtime();
 
-//     }
+    total_timeH += (t_end - t_start);
 
-//     double t_end = omp_get_wtime();
-
-//     total_timeH += (t_end - t_start);
-
-    // printf("Total time for Beam H: %f secs\n", total_timeH);
+    printf("Total time for Beam H: %f secs\n", total_timeH);
 
     // from left to right
     for(int j = 0; j < seq_length; ++j) {
@@ -1014,57 +1014,57 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
         unordered_map<int, State>& beamstepM = bestM[j];
         State& beamstepC = bestC[j];
 
-        double t_start = omp_get_wtime();
+//         double t_start = omp_get_wtime();
 
-        //beam of H
-        {
-            if (beam > 0 && beamstepH.size() > beam) beam_prune(j, beamstepH);
+//         //beam of H
+//         {
+//             if (beam > 0 && beamstepH.size() > beam) beam_prune(j, beamstepH);
 
-            {
-                int jnext = next_pair[nucj][j];
-                if (no_sharp_turn) while (jnext - j < 4 && jnext != -1) jnext = next_pair[nucj][jnext];
+//             {
+//                 int jnext = next_pair[nucj][j];
+//                 if (no_sharp_turn) while (jnext - j < 4 && jnext != -1) jnext = next_pair[nucj][jnext];
 
-                // lisiz, constriants
-                if (use_constraints){
-                    if (!allow_unpaired_position[j]){
-                        jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
-                    }
-                    if (jnext != -1){
-                        int nucjnext = nucs[jnext];
-                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
-                            jnext = -1;
-                    }
-                }
+//                 // lisiz, constriants
+//                 if (use_constraints){
+//                     if (!allow_unpaired_position[j]){
+//                         jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
+//                     }
+//                     if (jnext != -1){
+//                         int nucjnext = nucs[jnext];
+//                         if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
+//                             jnext = -1;
+//                     }
+//                 }
 
-                if (jnext != -1) {
-                    int nucjnext = nucs[jnext];
-                    int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
+//                 if (jnext != -1) {
+//                     int nucjnext = nucs[jnext];
+//                     int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
-                    value_type newscore;
+//                     value_type newscore;
 
-#ifdef lv
-                        int tetra_hex_tri = -1;
-#ifdef SPECIAL_HP
-                        if (jnext-j-1 == 4) // 6:tetra
-                            tetra_hex_tri = if_tetraloops[j];
-                        else if (jnext-j-1 == 6) // 8:hexa
-                            tetra_hex_tri = if_hexaloops[j];
-                        else if (jnext-j-1 == 3) // 5:tri
-                            tetra_hex_tri = if_triloops[j];
-#endif
-                        newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
-#else
-                        newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
-#endif
-                    // this candidate must be the best one at [j, jnext]
-                    // so no need to check the score
+// #ifdef lv
+//                         int tetra_hex_tri = -1;
+// #ifdef SPECIAL_HP
+//                         if (jnext-j-1 == 4) // 6:tetra
+//                             tetra_hex_tri = if_tetraloops[j];
+//                         else if (jnext-j-1 == 6) // 8:hexa
+//                             tetra_hex_tri = if_hexaloops[j];
+//                         else if (jnext-j-1 == 3) // 5:tri
+//                             tetra_hex_tri = if_triloops[j];
+// #endif
+//                         newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
+// #else
+//                         newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
+// #endif
+//                     // this candidate must be the best one at [j, jnext]
+//                     // so no need to check the score
 
-                    update_if_better(bestH[jnext][j], newscore, MANNER_H);
-                    //++ nos_H;
-                }
-            }
+//                     update_if_better(bestH[jnext][j], newscore, MANNER_H);
+//                     //++ nos_H;
+//                 }
+//             }
 
-            {
+//             {
                 // for every state h in H[j]
                 //   1. extend h(i, j) to h(i, jnext)
                 //   2. generate p(i, j)
@@ -1086,61 +1086,61 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
                     }
                 }
 
-                #pragma omp parallel for schedule(static)
-                for (int i = 0; i <= j; ++i) {
+//                 #pragma omp parallel for schedule(static)
+//                 for (int i = 0; i <= j; ++i) {
 
 
-                    // printf("%d\n", i);
-                    State &state = beamstepH[i];
+//                     // printf("%d\n", i);
+//                     State &state = beamstepH[i];
                     
-                    if(state.score != VALUE_MIN)
-                    {
+//                     if(state.score != VALUE_MIN)
+//                     {
                         
-                        int nuci = nucs[i];
-                        int jnext = next_pair[nuci][j];
+//                         int nuci = nucs[i];
+//                         int jnext = next_pair[nuci][j];
 
-                        // lisiz, constraints
-                        if (jnext != -1 && use_constraints){
-                            int nucjnext = nucs[jnext];
-                            if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, cons, nuci, nucjnext))
-                                continue;
-                        }
+//                         // lisiz, constraints
+//                         if (jnext != -1 && use_constraints){
+//                             int nucjnext = nucs[jnext];
+//                             if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, cons, nuci, nucjnext))
+//                                 continue;
+//                         }
 
-                        if (jnext != -1) {
-                            int nuci1 = (i + 1) < seq_length ? nucs[i + 1] : -1;
-                            int nucjnext = nucs[jnext];
-                            int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
+//                         if (jnext != -1) {
+//                             int nuci1 = (i + 1) < seq_length ? nucs[i + 1] : -1;
+//                             int nucjnext = nucs[jnext];
+//                             int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
-                            // 1. extend h(i, j) to h(i, jnext)
-                            value_type newscore;
+//                             // 1. extend h(i, j) to h(i, jnext)
+//                             value_type newscore;
 
-#ifdef lv
-                                int tetra_hex_tri = -1;
-#ifdef SPECIAL_HP
-                                if (jnext-i-1 == 4) // 6:tetra
-                                    tetra_hex_tri = if_tetraloops[i];
-                                else if (jnext-i-1 == 6) // 8:hexa
-                                    tetra_hex_tri = if_hexaloops[i];
-                                else if (jnext-i-1 == 3) // 5:tri
-                                    tetra_hex_tri = if_triloops[i];
-#endif
-                                newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
-#else
-                                newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
-#endif
-                            // this candidate must be the best one at [i, jnext]
-                            // so no need to check the score
-                            update_if_better(bestH[jnext][i], newscore, MANNER_H);
-                            //++nos_H;
-                        }
-                    }
-                }
-            }
-        }
+// #ifdef lv
+//                                 int tetra_hex_tri = -1;
+// #ifdef SPECIAL_HP
+//                                 if (jnext-i-1 == 4) // 6:tetra
+//                                     tetra_hex_tri = if_tetraloops[i];
+//                                 else if (jnext-i-1 == 6) // 8:hexa
+//                                     tetra_hex_tri = if_hexaloops[i];
+//                                 else if (jnext-i-1 == 3) // 5:tri
+//                                     tetra_hex_tri = if_triloops[i];
+// #endif
+//                                 newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
+// #else
+//                                 newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
+// #endif
+//                             // this candidate must be the best one at [i, jnext]
+//                             // so no need to check the score
+//                             update_if_better(bestH[jnext][i], newscore, MANNER_H);
+//                             //++nos_H;
+//                         }
+//                     }
+//                 }
+//             }
+//         }
 
-        double t_end = omp_get_wtime();
+//         double t_end = omp_get_wtime();
 
-        total_timeH += (t_end - t_start);
+//         total_timeH += (t_end - t_start);
 
         if (j == 0) continue;
 
@@ -2113,6 +2113,8 @@ static inline void rtrim(std::string &s) {
 int main(int argc, char** argv){
 
     double start_time = omp_get_wtime();
+
+    omp_set_num_threads(16);
 
     int beamsize = 100;
     bool sharpturn = false;
