@@ -148,7 +148,8 @@ private:
 
     unsigned seq_length;
 
-    std::vector<std::unordered_map<int, State>> bestH, bestP, bestM2, bestMulti, bestM;
+    std::vector<std::vector<State>> bestH;
+    std::vector<std::unordered_map<int, State>> bestP, bestM2, bestM, bestMulti;
 
     //Zuker subopt
     std::vector<std::unordered_map<int, State>> bestH_beta, bestP_beta, bestM2_beta, bestMulti_beta, bestM_beta;
@@ -203,6 +204,8 @@ private:
     };
 
     value_type beam_prune(std::unordered_map<int, State>& beamstep);
+
+    value_type beam_prune(int j, std::vector<State>& beamstep);
 
     // vector to store the scores at each beam temporarily for beam pruning
     std::vector<std::pair<value_type, int>> scores;
