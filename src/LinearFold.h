@@ -188,17 +188,17 @@ private:
 
     void prepare(unsigned len);
 
-    void update_if_better(State &state, value_type newscore, Manner manner) {
+    inline void update_if_better(State &state, value_type newscore, Manner manner) {
       if (state.score < newscore)
             state.set(newscore, manner);
     };
 
-    void update_if_better(State &state, value_type newscore, Manner manner, int split) {
+    inline void update_if_better(State &state, value_type newscore, Manner manner, int split) {
         if (state.score < newscore || state.manner == MANNER_NONE)
             state.set(newscore, manner, split);
     };
 
-    void update_if_better(State &state, value_type newscore, Manner manner, char l1, int l2) {
+    inline void update_if_better(State &state, value_type newscore, Manner manner, char l1, int l2) {
         if (state.score < newscore || state.manner == MANNER_NONE)
             state.set(newscore, manner, l1, l2);
     };

@@ -999,7 +999,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 
     total_timeH += (t_end - t_start);
 
-    printf("Total time for Beam H: %f secs\n", total_timeH);
+    printf("Precomputed part, Total time for Beam H: %f secs\n", total_timeH);
 
     // from left to right
     for(int j = 0; j < seq_length; ++j) {
@@ -1014,7 +1014,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
         unordered_map<int, State>& beamstepM = bestM[j];
         State& beamstepC = bestC[j];
 
-//         double t_start = omp_get_wtime();
+        double t_start = omp_get_wtime();
 
 //         //beam of H
 //         {
@@ -1138,9 +1138,9 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 //             }
 //         }
 
-//         double t_end = omp_get_wtime();
+        double t_end = omp_get_wtime();
 
-//         total_timeH += (t_end - t_start);
+        total_timeH += (t_end - t_start);
 
         if (j == 0) continue;
 
@@ -1607,7 +1607,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(string& seq, vector<int>* cons
 
     }  // end of for-loo j
 
-    printf("Total time for Beam H: %f secs\n", total_timeH);
+    printf("Total time for Beam H (with pushes to beam of P): %f secs\n", total_timeH);
 
     State& viterbi = bestC[seq_length-1];
 
